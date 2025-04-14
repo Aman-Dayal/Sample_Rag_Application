@@ -1,0 +1,447 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG Q&A System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        /* Custom scrollbar for chat */
+        .chat-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .chat-scrollbar::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        .chat-scrollbar::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+        .chat-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        
+        /* Message animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .message-animation {
+            animation: fadeIn 0.3s ease-out forwards;
+        }
+
+        /* Typing indicator animation */
+        @keyframes typing {
+            0% { opacity: 0.3; }
+            50% { opacity: 1; }
+            100% { opacity: 0.3; }
+        }
+        .typing-dot {
+            animation: typing 1.4s infinite;
+        }
+        .typing-dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        .typing-dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-6xl">
+        <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+            <!-- Header -->
+            <div class="px-6 py-4 bg-indigo-600 text-white">
+                <h1 class="text-xl font-bold">RAG-based Q&A System</h1>
+                <p class="text-sm opacity-90">Interact with your documents using AI</p>
+            </div>
+            
+            <!-- Tab Navigation -->
+            <div class="border-b border-gray-200">
+                <nav class="flex -mb-px" aria-label="Tabs">
+                    <button id="ingest-tab" class="px-6 py-3 text-indigo-600 border-b-2 border-indigo-500 font-medium text-sm active-tab" 
+                            onclick="switchTab('ingest')">
+                        Ingest Content
+                    </button>
+                    <button id="chat-tab" class="px-6 py-3 text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm" 
+                            onclick="switchTab('chat')">
+                        Chat
+                    </button>
+                </nav>
+            </div>
+            
+            <!-- Tab Content Area -->
+            <div class="p-6">
+                <!-- Ingest Content Tab -->
+                <div id="ingest-panel" class="tab-panel">
+                    <div class="mb-4">
+                        <label for="url-input" class="block text-sm font-medium text-gray-700 mb-1">Enter URLs to ingest content (one URL per line)</label>
+                        <textarea id="url-input" rows="5" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" 
+                                  placeholder="https://example.com&#10;https://another-site.com"></textarea>
+                    </div>
+                    
+                    <button id="ingest-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 px-4 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors">
+                        Ingest Content
+                    </button>
+                    
+                    <!-- Ingest Loading Indicator -->
+                    <div id="ingest-loading" class="hidden mt-4 text-center">
+                        <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-indigo-500 border-t-transparent"></div>
+                        <p class="mt-2 text-gray-600">Ingesting content, please wait...</p>
+                    </div>
+                    
+                    <!-- Ingested URLs List -->
+                    <div id="ingested-urls-container" class="mt-6 hidden">
+                        <h3 class="text-md font-semibold text-gray-700 mb-2">Ingested URLs</h3>
+                        <ul id="ingested-urls-list" class="bg-gray-50 rounded-md border border-gray-200 divide-y divide-gray-200 overflow-hidden">
+                            <!-- URLs will be added here dynamically -->
+                        </ul>
+                    </div>
+                </div>
+                
+                <!-- Chat Tab -->
+                <div id="chat-panel" class="tab-panel hidden">
+                    <!-- System Status -->
+                    <div class="flex items-center mb-4 px-3 py-2 bg-gray-50 rounded-md">
+                        <span id="status-indicator" class="inline-block w-3 h-3 rounded-full mr-2"></span>
+                        <span id="status-text" class="text-sm text-gray-600">Loading system status...</span>
+                    </div>
+                    
+                    <!-- Chat Container -->
+                    <div class="border border-gray-200 rounded-lg shadow-sm bg-gray-50 mb-4">
+                        <!-- Chat Messages -->
+                        <div id="chat-messages" class="h-96 overflow-y-auto p-4 space-y-4 chat-scrollbar">
+                            <div class="flex items-start">
+                                <div class="flex-shrink-0">
+                                    <div class="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white">
+                                        <span>AI</span>
+                                    </div>
+                                </div>
+                                <div class="ml-3 bg-white rounded-lg px-4 py-2 shadow-sm max-w-3xl message-animation">
+                                    <p class="text-gray-800">Hello! I'm ready to answer questions about your documents. Please ingest some content first if you haven't already.</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Typing Indicator -->
+                        <div id="typing-indicator" class="px-4 py-2 hidden">
+                            <div class="flex items-center space-x-1 text-gray-500">
+                                <div class="typing-dot w-2 h-2 bg-gray-500 rounded-full"></div>
+                                <div class="typing-dot w-2 h-2 bg-gray-500 rounded-full"></div>
+                                <div class="typing-dot w-2 h-2 bg-gray-500 rounded-full"></div>
+                            </div>
+                        </div>
+                        
+                        <!-- Chat Input -->
+                        <div class="border-t border-gray-200 p-4">
+                            <div class="flex">
+                                <textarea id="message-input" class="flex-grow px-4 py-2 border border-gray-300 rounded-l-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" 
+                                      placeholder="Ask a question about your documents..." rows="2"></textarea>
+                                <button id="send-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 rounded-r-md transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Sources Panel -->
+                    <div id="sources-panel" class="hidden mt-4">
+                        <h3 class="text-sm font-medium text-gray-700 mb-2">Sources</h3>
+                        <div class="bg-white border border-gray-200 rounded-md shadow-sm p-3">
+                            <ul id="sources-list" class="text-sm text-gray-600 space-y-1">
+                                <!-- Sources will be listed here -->
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Socket.IO
+        const socket = io();
+        
+        // DOM Elements
+        const ingestPanel = document.getElementById('ingest-panel');
+        const chatPanel = document.getElementById('chat-panel');
+        const ingestTab = document.getElementById('ingest-tab');
+        const chatTab = document.getElementById('chat-tab');
+        const chatMessages = document.getElementById('chat-messages');
+        const messageInput = document.getElementById('message-input');
+        const sendBtn = document.getElementById('send-btn');
+        const typingIndicator = document.getElementById('typing-indicator');
+        const sourcesPanel = document.getElementById('sources-panel');
+        const sourcesList = document.getElementById('sources-list');
+        
+        // Tab Switching
+        function switchTab(tabName) {
+            if (tabName === 'ingest') {
+                ingestPanel.classList.remove('hidden');
+                chatPanel.classList.add('hidden');
+                ingestTab.classList.add('text-indigo-600', 'border-b-2', 'border-indigo-500');
+                ingestTab.classList.remove('text-gray-500');
+                chatTab.classList.add('text-gray-500');
+                chatTab.classList.remove('text-indigo-600', 'border-b-2', 'border-indigo-500');
+            } else {
+                ingestPanel.classList.add('hidden');
+                chatPanel.classList.remove('hidden');
+                chatTab.classList.add('text-indigo-600', 'border-b-2', 'border-indigo-500');
+                chatTab.classList.remove('text-gray-500');
+                ingestTab.classList.add('text-gray-500');
+                ingestTab.classList.remove('text-indigo-600', 'border-b-2', 'border-indigo-500');
+                
+                // Check system status when switching to chat tab
+                checkStatus();
+            }
+        }
+        
+        // Check system status
+        function checkStatus() {
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    const statusIndicator = document.getElementById('status-indicator');
+                    const statusText = document.getElementById('status-text');
+                    
+                    if (data.ready) {
+                        statusIndicator.className = 'inline-block w-3 h-3 rounded-full mr-2 bg-green-500';
+                        statusText.textContent = `System ready (${data.doc_count} document chunks from ${data.url_count} URLs)`;
+                        document.getElementById('send-btn').disabled = false;
+                    } else {
+                        statusIndicator.className = 'inline-block w-3 h-3 rounded-full mr-2 bg-red-500';
+                        statusText.textContent = 'System not ready - Please ingest content first';
+                        document.getElementById('send-btn').disabled = true;
+                    }
+                    
+                    // Update ingested URLs list
+                    if (data.urls && data.urls.length > 0) {
+                        const urlsList = document.getElementById('ingested-urls-list');
+                        urlsList.innerHTML = '';
+                        
+                        data.urls.forEach(url => {
+                            const li = document.createElement('li');
+                            li.className = 'px-4 py-3 text-sm text-gray-700 break-all';
+                            li.textContent = url;
+                            urlsList.appendChild(li);
+                        });
+                        
+                        document.getElementById('ingested-urls-container').classList.remove('hidden');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error checking status:', error);
+                });
+        }
+        
+        // Add message to chat
+        function addMessage(sender, message, isUser = false) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'flex items-start message-animation';
+            
+            const avatarDiv = document.createElement('div');
+            avatarDiv.className = 'flex-shrink-0';
+            
+            const avatar = document.createElement('div');
+            
+            if (isUser) {
+                avatar.className = 'w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white';
+                avatar.innerHTML = '<span>You</span>';
+            } else {
+                avatar.className = 'w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white';
+                avatar.innerHTML = '<span>AI</span>';
+            }
+            
+            avatarDiv.appendChild(avatar);
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.className = `ml-3 ${isUser ? 'bg-blue-50' : 'bg-white'} rounded-lg px-4 py-2 shadow-sm max-w-3xl`;
+            
+            const text = document.createElement('p');
+            text.className = 'text-gray-800';
+            text.textContent = message;
+            
+            contentDiv.appendChild(text);
+            messageDiv.appendChild(avatarDiv);
+            messageDiv.appendChild(contentDiv);
+            
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+        
+        // Show sources
+        function showSources(sources) {
+            if (sources && sources.length > 0) {
+                sourcesList.innerHTML = '';
+                
+                sources.forEach(source => {
+                    const li = document.createElement('li');
+                    li.className = 'break-all';
+                    li.textContent = source;
+                    sourcesList.appendChild(li);
+                });
+                
+                sourcesPanel.classList.remove('hidden');
+            } else {
+                sourcesPanel.classList.add('hidden');
+            }
+        }
+        
+        // Socket.IO Event Handlers
+        socket.on('connect', () => {
+            console.log('Connected to WebSocket server');
+            socket.emit('started');
+        });
+        
+        socket.on('response_chunk', (data) => {
+            // Show typing indicator when first chunk arrives
+            if (!typingIndicator.classList.contains('flex')) {
+                typingIndicator.classList.remove('hidden');
+                typingIndicator.classList.add('flex');
+            }
+            
+            // Create or update the message container for the ongoing response
+            let responseMessage = document.getElementById('ongoing-response');
+            if (!responseMessage) {
+                // Create a new message container for the AI response
+                responseMessage = document.createElement('div');
+                responseMessage.id = 'ongoing-response';
+                responseMessage.className = 'flex items-start message-animation';
+                
+                const avatarDiv = document.createElement('div');
+                avatarDiv.className = 'flex-shrink-0';
+                
+                const avatar = document.createElement('div');
+                avatar.className = 'w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white';
+                avatar.innerHTML = '<span>AI</span>';
+                
+                avatarDiv.appendChild(avatar);
+                
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'ml-3 bg-white rounded-lg px-4 py-2 shadow-sm max-w-3xl';
+                
+                const text = document.createElement('p');
+                text.id = 'ongoing-text';
+                text.className = 'text-gray-800';
+                text.textContent = data.chunk;
+                
+                contentDiv.appendChild(text);
+                responseMessage.appendChild(avatarDiv);
+                responseMessage.appendChild(contentDiv);
+                
+                chatMessages.appendChild(responseMessage);
+            } else {
+                // Update the existing message with the new chunk
+                const text = document.getElementById('ongoing-text');
+                text.textContent += data.chunk;
+            }
+            
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        });
+        
+        socket.on('response_complete', (data) => {
+            // Hide typing indicator and remove the ongoing-response id
+            typingIndicator.classList.remove('flex');
+            typingIndicator.classList.add('hidden');
+            
+            const responseElement = document.getElementById('ongoing-response');
+            if (responseElement) {
+                responseElement.removeAttribute('id');
+                const textElement = document.getElementById('ongoing-text');
+                if (textElement) {
+                    textElement.removeAttribute('id');
+                }
+            }
+            
+            // Show sources if available
+            showSources(data.sources);
+            
+            // Re-enable send button
+            sendBtn.disabled = false;
+            messageInput.disabled = false;
+        });
+        
+        // Handle message sending
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            if (!message) return;
+            
+            // Add user message to chat
+            addMessage('You', message, true);
+            
+            // Clear input
+            messageInput.value = '';
+            
+            // Disable input during processing
+            sendBtn.disabled = true;
+            messageInput.disabled = true;
+            
+            // Hide sources panel
+            sourcesPanel.classList.add('hidden');
+            console.log(message)
+            // Emit message to server via WebSocket
+            socket.emit('user_message', { message: message });
+        }
+        
+        // Event Listeners
+        sendBtn.addEventListener('click', sendMessage);
+        
+        messageInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+        
+        // Ingest content button
+        document.getElementById('ingest-btn').addEventListener('click', function() {
+            const urlInput = document.getElementById('url-input').value.trim();
+            if (!urlInput) {
+                alert('Please enter at least one URL');
+                return;
+            }
+            
+            const urls = urlInput.split('\n').filter(url => url.trim().length > 0);
+            
+            // Show loading spinner
+            document.getElementById('ingest-loading').classList.remove('hidden');
+            document.getElementById('ingest-btn').disabled = true;
+            
+            fetch('/api/ingest', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ urls: urls })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Hide loading spinner
+                document.getElementById('ingest-loading').classList.add('hidden');
+                document.getElementById('ingest-btn').disabled = false;
+                
+                if (data.success) {
+                    alert(`Successfully ingested ${data.doc_count} document chunks from ${data.url_count} URLs`);
+                    checkStatus();
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            })
+            .catch(error => {
+                document.getElementById('ingest-loading').classList.add('hidden');
+                document.getElementById('ingest-btn').disabled = false;
+                alert('Error ingesting content: ' + error);
+                console.error('Error:', error);
+            });
+        });
+        
+        document.addEventListener('DOMContentLoaded', checkStatus);
+    </script>
+</body>
+</html>
+    
